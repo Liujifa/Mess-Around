@@ -50,7 +50,7 @@ class WebNovelDownloader:
     CODE = ((58344, 58715), (58345, 58716))
     MAX_WORKERS = 4
     MAX_CONTENT_RETRIES = 3
-    MAX_CATALOG_PAGES = 60
+    MAX_CATALOG_PAGES = 200
     MAX_CHAPTER_PAGES = 24
 
     CHAPTER_SKIP_KEYWORDS = (
@@ -192,6 +192,7 @@ class WebNovelDownloader:
         self.download_dir = download_dir
         self.progress_callback = progress_callback
         self.log_callback = log_callback
+        self.is_cancelled = False
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -307,6 +308,8 @@ class WebNovelDownloader:
         chapters = []
         total = len(chapter_links)
         for current, chapter in enumerate(chapter_links, start=1):
+            if self.is_cancelled:
+                raise WebDownloadError("Download canceled by user.")
             chapter_title, content = self._download_fanqie_single_chapter(chapter.url, title_hint=chapter.title)
             if content:
                 chapters.append((chapter_title, content))
@@ -397,6 +400,8 @@ class WebNovelDownloader:
 
             completed = 0
             for future in concurrent.futures.as_completed(future_map):
+                if self.is_cancelled:
+                    raise WebDownloadError("Download canceled by user.")
                 chapter = future_map[future]
                 completed += 1
                 try:
@@ -548,6 +553,8 @@ class WebNovelDownloader:
         visited = {current_url}
 
         for _ in range(self.MAX_CATALOG_PAGES):
+            if self.is_cancelled:
+                raise WebDownloadError("Download canceled by user.")
             pages.append((current_url, current_soup))
             next_page_url = self.find_next_catalog_page(current_url, current_soup)
             if not next_page_url or next_page_url in visited:
@@ -562,12 +569,22 @@ class WebNovelDownloader:
     def find_next_catalog_page(self, current_url: str, soup: BeautifulSoup) -> str:
         for anchor in soup.select("a[href]"):
             label = self.clean_text(anchor.get_text(" ", strip=True)).lower()
-            if not any(keyword in label for keyword in self.NEXT_PAGE_TEXTS):
-                continue
+            if any(keyword in label for keyword in self.NEXT_PAGE_TEXTS):
+                href = self.normalize_link(current_url, anchor.get("href"))
+                if href and self.is_catalog_pagination_candidate(current_url, href):
+                    return href
 
-            href = self.normalize_link(current_url, anchor.get("href"))
-            if href and self.is_catalog_pagination_candidate(current_url, href):
-                return href
+        guessed = self.build_next_chapter_page_url(current_url)
+        if guessed and guessed != current_url:
+            parsed_guessed = urlparse(guessed)
+            for anchor in soup.select("a[href]"):
+                href = self.normalize_link(current_url, anchor.get("href"))
+                if not href:
+                    continue
+                parsed_href = urlparse(href)
+                if parsed_href.path == parsed_guessed.path and parsed_href.query == parsed_guessed.query:
+                    if self.is_catalog_pagination_candidate(current_url, href):
+                        return href
 
         return ""
 
@@ -638,6 +655,10 @@ class WebNovelDownloader:
 
         if path.lower().endswith(".html"):
             new_path = path[:-5] + "_2.html"
+            return urlunparse(parsed._replace(path=new_path))
+
+        if path.endswith("/"):
+            new_path = path + "index_2.html"
             return urlunparse(parsed._replace(path=new_path))
 
         query = parse_qs(parsed.query, keep_blank_values=True)

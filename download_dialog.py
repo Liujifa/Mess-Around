@@ -32,6 +32,7 @@ TRANSLATIONS = {
         "close": "\u5173\u95ed",
         "status_idle": "\u7b49\u5f85\u5f00\u59cb",
         "logs": "下载日志",
+        "cancel": "取消下载",
         "hint": "请输入小说目录页或单章页URL。即使输入单章，下载器也会自动尝试追溯全书目录并完整下载全本。",
         "missing_url": "请先输入 URL。",
         "success": "\u4e0b\u8f7d\u5b8c\u6210\uff0c\u5df2\u81ea\u52a8\u51c6\u5907\u5165\u5e93\u3002",
@@ -50,6 +51,7 @@ TRANSLATIONS = {
         "close": "Close",
         "status_idle": "Waiting to start",
         "logs": "Download Log",
+        "cancel": "Cancel",
         "hint": "Enter a novel index or single chapter URL. The downloader will intelligently trace back to the catalog and download the entire book.",
         "missing_url": "Please enter a URL first.",
         "success": "Download completed and is ready to import into the library.",
@@ -73,15 +75,16 @@ class DownloadWorker(QObject):
         self.title = title
         self.browser = browser
         self.download_dir = download_dir
+        self.downloader = None
 
     def run(self):
         try:
-            downloader = WebNovelDownloader(
+            self.downloader = WebNovelDownloader(
                 download_dir=self.download_dir,
                 progress_callback=self.progress.emit,
                 log_callback=self.log.emit,
             )
-            result = downloader.download(self.url, self.title, self.browser)
+            result = self.downloader.download(self.url, self.title, self.browser)
             payload = {
                 "title": result.title,
                 "file_path": result.file_path,
@@ -94,6 +97,9 @@ class DownloadWorker(QObject):
         except Exception as exc:
             self.failed.emit(str(exc))
 
+    def abort(self):
+        if self.downloader:
+            self.downloader.is_cancelled = True
 
 class WebDownloadDialog(QDialog):
     def __init__(self, language: str = "CN", parent=None):
@@ -170,7 +176,7 @@ class WebDownloadDialog(QDialog):
         self.progress_bar.setValue(0)
         self.status_label.setText(self.t("status_idle"))
         self.btn_download.setEnabled(False)
-        self.btn_close.setEnabled(False)
+        self.btn_close.setText(self.t("cancel"))
         self.url_input.setEnabled(False)
         self.title_input.setEnabled(False)
         self.browser_combo.setEnabled(False)
@@ -214,6 +220,7 @@ class WebDownloadDialog(QDialog):
         self.progress_bar.setValue(100)
         self.status_label.setText(self.t("success"))
         self.append_log(payload["file_path"])
+        self.btn_close.setText(self.t("close"))
         QMessageBox.information(self, self.t("title"), self.t("success"))
         self.accept()
 
@@ -223,6 +230,7 @@ class WebDownloadDialog(QDialog):
         self.append_log(message)
         QMessageBox.critical(self, self.t("failed"), message)
         self.btn_download.setEnabled(True)
+        self.btn_close.setText(self.t("close"))
         self.btn_close.setEnabled(True)
         self.url_input.setEnabled(True)
         self.title_input.setEnabled(True)
@@ -230,5 +238,9 @@ class WebDownloadDialog(QDialog):
 
     def reject(self):
         if self.thread and self.thread.isRunning():
+            if self.worker:
+                self.worker.abort()
+            self.btn_close.setEnabled(False)
+            self.append_log("Canceling download...")
             return
         super().reject()
