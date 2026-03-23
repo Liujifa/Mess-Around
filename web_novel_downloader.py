@@ -163,6 +163,8 @@ class WebNovelDownloader:
     NEXT_PAGE_TEXTS = (
         "\u4e0b\u4e00\u9875",
         "\u4e0b\u9875",
+        "\u4e0b\u4e00\u7ae0",
+        "\u4e0b\u7ae0",
         "next",
         "next page",
     )
@@ -601,7 +603,7 @@ class WebNovelDownloader:
         if current_base == next_base:
             return True
 
-        if "/index/" in next_page.path:
+        if "index" in next_page.path.lower() or "list" in next_page.path.lower():
             return True
 
         return False

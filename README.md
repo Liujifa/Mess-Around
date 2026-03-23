@@ -8,8 +8,8 @@
 - **Python 3.9+**: 核心编程语言，提供文本处理和跨平台运行能力。
 - **PyQt6**: 构建桌面图形用户界面（GUI）。
 - **Requests & BeautifulSoup4**: 处理网络请求与 HTML 解析，实现网页小说抓取。
-- **browser-cookie3**: 用于获取浏览器 Cookie 以抓取防爬虫网站。
 - **Regex (正则表达式)**: 提取和匹配小说网站的章节格式。
+- **Chardet**: 自动识别网页编码。
 
 ## ✨ 核心功能 (Features)
 
@@ -34,10 +34,13 @@
    git clone https://github.com/Liujifa/Mess-Around.git
    cd Mess-Around
    ```
-2. 确保您的电脑上已安装 Python 3.9 或更高版本。
-3. 安装依赖库：
+2. 确保您的电脑上已安装 **Python 3.9** 或更高版本。
+3. **一键安装与启动 (推荐)**：
+   - 直接双击运行目录下的 `StartReader.bat`。
+   - 脚本会自动检查并安装所需的 Python 依赖库（PyQt6, requests 等）。
+4. **手动安装依赖 (可选)**：
    ```bash
-   pip install PyQt6 requests beautifulsoup4 browser-cookie3 chardet
+   pip install -r requirements.txt
    ```
 
 ## 🖥️ 使用方法 (Usage)
