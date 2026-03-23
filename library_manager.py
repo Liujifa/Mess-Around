@@ -12,8 +12,15 @@ class LibraryManager:
             try:
                 with open(self.data_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    if "first_run" not in data.get("settings", {}):
-                        data["settings"]["first_run"] = True
+                    settings = data.setdefault("settings", {})
+                    defaults = self.default_settings()
+
+                    for key, value in defaults.items():
+                        settings.setdefault(key, value)
+
+                    # Legacy setting, no longer exposed in the UI.
+                    settings.pop("window_opacity", None)
+
                     return data
             except:
                 return {"library": [], "settings": self.default_settings()}
@@ -24,7 +31,6 @@ class LibraryManager:
             "font_size": 18,
             "font_color": "#e0e0e0",
             "text_opacity": 1.0,
-            "window_opacity": 0.9,
             "reading_mode": False,
             "language": "CN",
             "first_run": True
@@ -44,11 +50,24 @@ class LibraryManager:
         return new_item
 
     def update_pos(self, path, pos):
+        self.update_progress(path, pos)
+
+    def update_progress(self, path, pos, scroll_value=0, scroll_max=0):
+        scroll_ratio = (scroll_value / scroll_max) if scroll_max else 0.0
         for item in self.data["library"]:
             if item["path"] == path:
+                current_pos = item.get("last_pos", 0)
+                current_ratio = item.get("last_scroll_ratio", 0.0)
+                if current_pos == pos and abs(current_ratio - scroll_ratio) < 0.0005:
+                    return False
                 item["last_pos"] = pos
+                item["last_scroll_ratio"] = scroll_ratio
                 break
+        else:
+            return False
+
         self.save()
+        return True
 
     def get_settings(self):
         return self.data.get("settings", self.default_settings())

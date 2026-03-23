@@ -1,45 +1,66 @@
-# library_view.py
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-                             QListWidget, QFileDialog, QLabel, QGroupBox, 
-                             QSlider, QColorDialog, QCheckBox, QTextEdit)
+import os
+
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPalette
+from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtWidgets import (
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QPushButton,
+    QSlider,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+import styles
+
 
 TRANSLATIONS = {
     "CN": {
-        "lib_title": "小說書庫",
-        "add_novel": "添加小說 (TXT)",
-        "start_reading": "開始閱讀",
-        "settings": "設置",
-        "font_size": "字體大小:",
-        "win_opacity": "窗口不透明度:",
-        "text_opacity": "文字不透明度:",
-        "stealth_mode": "隱身閱讀模式",
-        "change_color": "更換字體顏色",
-        "preview_title": "樣式預覽 (Preview)",
-        "lang_toggle": "切換語言/English",
-        "preview_text": "這是一個預覽文本，用於展示你調整後的字體大小、顏色和透明度效果。\n\nThis is a preview text for testing your style settings.",
-        "chapter_select": "選擇章節:"
+        "lib_title": "\u5c0f\u8bf4\u4e66\u5e93",
+        "add_novel": "\u6dfb\u52a0\u5c0f\u8bf4 (TXT)",
+        "start_reading": "\u5f00\u59cb\u9605\u8bfb",
+        "settings": "\u9605\u8bfb\u8bbe\u7f6e",
+        "font_size": "\u5b57\u4f53\u5927\u5c0f",
+        "text_opacity": "\u6587\u5b57\u900f\u660e\u5ea6",
+        "stealth_mode": "\u9605\u8bfb\u6a21\u5f0f",
+        "change_color": "\u66f4\u6539\u6587\u5b57\u989c\u8272",
+        "preview_title": "\u6837\u5f0f\u9884\u89c8",
+        "lang_toggle": "\u5207\u6362\u8bed\u8a00 / English",
+        "preview_text": "\u8fd9\u91cc\u662f\u6837\u5f0f\u9884\u89c8\u533a\uff0c\u7528\u6765\u68c0\u67e5\u5b57\u4f53\u5927\u5c0f\u3001\u989c\u8272\u548c\u900f\u660e\u5ea6\u662f\u5426\u5408\u9002\u3002\n\n\u8c03\u6574\u53f3\u4fa7\u8bbe\u7f6e\u540e\uff0c\u8fd9\u91cc\u7684\u663e\u793a\u4f1a\u7acb\u5373\u66f4\u65b0\u3002",
+        "chapter_select": "\u7ae0\u8282\u5b9a\u4f4d",
+        "current_progress": "\u5f53\u524d\u7eed\u8bfb\u7ae0\u8282\uff1a",
+        "next_start": "\u5373\u5c06\u4ece\u8fd9\u91cc\u5f00\u59cb\uff1a",
+        "no_chapters": "\u672a\u8bc6\u522b\u5230\u7ae0\u8282\uff0c\u5c06\u6309\u4e0a\u6b21\u9605\u8bfb\u4f4d\u7f6e\u7ee7\u7eed\u3002",
     },
     "EN": {
         "lib_title": "Novel Library",
         "add_novel": "Add Novel (TXT)",
         "start_reading": "Start Reading",
-        "settings": "Settings",
-        "font_size": "Font Size:",
-        "win_opacity": "Win Opacity:",
-        "text_opacity": "Text Opacity:",
-        "stealth_mode": "Stealth Mode",
-        "change_color": "Change Color",
+        "settings": "Reading Settings",
+        "font_size": "Font Size",
+        "text_opacity": "Text Opacity",
+        "stealth_mode": "Reading Mode",
+        "change_color": "Change Text Color",
         "preview_title": "Style Preview",
-        "lang_toggle": "Language: 中文",
-        "preview_text": "This is a preview text for testing your style settings.\n\n這是一段用於測試樣式設置的預覽文本。",
-        "chapter_select": "Select Chapter:"
-    }
+        "lang_toggle": "Language / \u4e2d\u6587",
+        "preview_text": "This preview area reflects the current font size, color, and opacity.\n\nChanges on the right are applied immediately.",
+        "chapter_select": "Chapter Position",
+        "current_progress": "Current chapter: ",
+        "next_start": "Will start from: ",
+        "no_chapters": "No chapters detected. Reading will resume from the last saved position.",
+    },
 }
 
+
 class LibraryView(QWidget):
-    novel_selected = pyqtSignal(dict, int) # dict: novel_data, int: start_pos
+    novel_selected = pyqtSignal(dict, int)
     settings_changed = pyqtSignal()
 
     def __init__(self, manager, logic):
@@ -48,48 +69,61 @@ class LibraryView(QWidget):
         self.logic = logic
         self.settings = self.manager.get_settings()
         self.current_chapters = []
+        self.current_novel_path = None
+        self.chapter_manually_selected = False
         self.init_ui()
 
     def init_ui(self):
+        self.setStyleSheet(styles.LIBRARY_QSS)
+
         self.main_layout = QHBoxLayout(self)
-        
-        # Left side: Library List
+        self.main_layout.setContentsMargins(18, 18, 18, 18)
+        self.main_layout.setSpacing(16)
+
         self.left_layout = QVBoxLayout()
+        self.left_layout.setSpacing(16)
         self.lib_group = QGroupBox(self.t("lib_title"))
         self.lib_layout = QVBoxLayout(self.lib_group)
-        
+        self.lib_layout.setSpacing(12)
+
         self.novel_list = QListWidget()
+        self.novel_list.setAlternatingRowColors(True)
+        self.novel_list.itemDoubleClicked.connect(lambda _item: self.on_read_selected())
         self.lib_layout.addWidget(self.novel_list)
-        
+
         self.btn_layout = QHBoxLayout()
+        self.btn_layout.setSpacing(10)
+
         self.btn_add = QPushButton(self.t("add_novel"))
         self.btn_add.clicked.connect(self.on_add_novel)
         self.btn_layout.addWidget(self.btn_add)
-        
+
         self.btn_read = QPushButton(self.t("start_reading"))
         self.btn_read.clicked.connect(self.on_read_selected)
         self.btn_layout.addWidget(self.btn_read)
-        
+
         self.lib_layout.addLayout(self.btn_layout)
-        
         self.left_layout.addWidget(self.lib_group)
         self.main_layout.addLayout(self.left_layout, 1)
 
-        # Right side: Settings, Chapter & Preview
         self.right_layout = QVBoxLayout()
-        
-        # Chapter Selection
+        self.right_layout.setSpacing(16)
+
         self.chapter_group = QGroupBox(self.t("chapter_select"))
         self.chapter_layout = QVBoxLayout(self.chapter_group)
-        from PyQt6.QtWidgets import QComboBox
+        self.chapter_layout.setSpacing(10)
         self.chapter_combo = QComboBox()
+        self.chapter_combo.currentIndexChanged.connect(self.on_chapter_changed)
         self.chapter_layout.addWidget(self.chapter_combo)
+
+        self.progress_label = QLabel()
+        self.progress_label.setWordWrap(True)
+        self.chapter_layout.addWidget(self.progress_label)
         self.right_layout.addWidget(self.chapter_group)
-        
+
         self.settings_group = QGroupBox(self.t("settings"))
         self.settings_layout = QVBoxLayout(self.settings_group)
-        
-        # Font Size
+        self.settings_layout.setSpacing(10)
 
         self.fs_label = QLabel(self.t("font_size"))
         self.settings_layout.addWidget(self.fs_label)
@@ -98,8 +132,7 @@ class LibraryView(QWidget):
         self.fs_slider.setValue(self.settings["font_size"])
         self.fs_slider.valueChanged.connect(self.update_settings)
         self.settings_layout.addWidget(self.fs_slider)
-        
-        # Text Opacity
+
         self.to_label = QLabel(self.t("text_opacity"))
         self.settings_layout.addWidget(self.to_label)
         self.to_slider = QSlider(Qt.Orientation.Horizontal)
@@ -107,15 +140,6 @@ class LibraryView(QWidget):
         self.to_slider.setValue(int(self.settings["text_opacity"] * 100))
         self.to_slider.valueChanged.connect(self.update_settings)
         self.settings_layout.addWidget(self.to_slider)
-
-        # Window Opacity
-        self.wo_label = QLabel(self.t("win_opacity"))
-        self.settings_layout.addWidget(self.wo_label)
-        self.wo_slider = QSlider(Qt.Orientation.Horizontal)
-        self.wo_slider.setRange(10, 100)
-        self.wo_slider.setValue(int(self.settings["window_opacity"] * 100))
-        self.wo_slider.valueChanged.connect(self.update_settings)
-        self.settings_layout.addWidget(self.wo_slider)
 
         self.btn_color = QPushButton(self.t("change_color"))
         self.btn_color.clicked.connect(self.on_change_color)
@@ -125,15 +149,13 @@ class LibraryView(QWidget):
         self.rm_check.setChecked(self.settings.get("reading_mode", False))
         self.rm_check.stateChanged.connect(self.update_settings)
         self.settings_layout.addWidget(self.rm_check)
-        
-        # Language Toggle
+
         self.btn_lang = QPushButton(self.t("lang_toggle"))
         self.btn_lang.clicked.connect(self.toggle_language)
         self.settings_layout.addWidget(self.btn_lang)
-        
+
         self.right_layout.addWidget(self.settings_group)
-        
-        # Preview Window
+
         self.preview_group = QGroupBox(self.t("preview_title"))
         self.preview_layout = QVBoxLayout(self.preview_group)
         self.preview_box = QTextEdit()
@@ -141,11 +163,12 @@ class LibraryView(QWidget):
         self.preview_box.setPlainText(self.t("preview_text"))
         self.preview_layout.addWidget(self.preview_box)
         self.right_layout.addWidget(self.preview_group)
-        
+
         self.main_layout.addLayout(self.right_layout, 1)
-        
+
         self.refresh_library()
         self.apply_preview_settings()
+        self.update_progress_label()
 
     def t(self, key):
         lang = self.settings.get("language", "CN")
@@ -166,69 +189,134 @@ class LibraryView(QWidget):
         self.settings_group.setTitle(self.t("settings"))
         self.fs_label.setText(self.t("font_size"))
         self.to_label.setText(self.t("text_opacity"))
-        self.wo_label.setText(self.t("win_opacity"))
         self.btn_color.setText(self.t("change_color"))
         self.rm_check.setText(self.t("stealth_mode"))
         self.btn_lang.setText(self.t("lang_toggle"))
         self.preview_group.setTitle(self.t("preview_title"))
         self.preview_box.setPlainText(self.t("preview_text"))
+        self.update_progress_label()
 
     def refresh_library(self):
         self.novel_list.clear()
-        # Re-connect selection change to auto-update chapters
         try:
             self.novel_list.itemSelectionChanged.disconnect(self.on_novel_selection_changed)
-        except:
+        except Exception:
             pass
+
         for item in self.manager.data["library"]:
             self.novel_list.addItem(item["title"])
+
         self.novel_list.itemSelectionChanged.connect(self.on_novel_selection_changed)
 
-    def on_novel_selection_changed(self):
+    def current_chapter_index_for_pos(self, pos):
+        if not self.current_chapters:
+            return -1
+
+        current_idx = 0
+        for i, chapter in enumerate(self.current_chapters):
+            if chapter["pos"] <= pos:
+                current_idx = i
+            else:
+                break
+        return current_idx
+
+    def update_progress_label(self, pos=None):
+        if pos is None:
+            novel = self.get_selected_novel()
+            pos = novel.get("last_pos", 0) if novel else 0
+
+        if not self.current_chapters:
+            self.progress_label.setText(self.t("no_chapters"))
+            return
+
+        if self.chapter_manually_selected and self.chapter_combo.currentIndex() >= 0:
+            chapter_title = self.chapter_combo.currentText().strip()
+            self.progress_label.setText(f"{self.t('next_start')}{chapter_title}")
+            return
+
+        index = self.current_chapter_index_for_pos(pos)
+        chapter_title = self.current_chapters[index]["title"].strip()
+        self.progress_label.setText(f"{self.t('current_progress')}{chapter_title}")
+
+    def sync_combo_to_progress(self, pos):
+        index = self.current_chapter_index_for_pos(pos)
+        if index < 0:
+            self.update_progress_label(pos)
+            return
+
+        self.chapter_combo.blockSignals(True)
+        self.chapter_combo.setCurrentIndex(index)
+        self.chapter_combo.blockSignals(False)
+        self.update_progress_label(pos)
+
+    def get_selected_novel(self):
         selected = self.novel_list.selectedItems()
         if not selected:
-            return
+            return None
+
         title = selected[0].text()
-        for n in self.manager.data["library"]:
-            if n["title"] == title:
-                # Load chapters to populate combo box
-                _, chapters = self.logic.load_txt(n["path"])
-                self.current_chapters = chapters
-                self.chapter_combo.clear()
-                
-                # Find current chapter based on last_pos
-                last_pos = n.get("last_pos", 0)
-                current_idx = 0
-                for i, ch in enumerate(chapters):
-                    self.chapter_combo.addItem(ch["title"])
-                    if ch["pos"] <= last_pos:
-                        current_idx = i
-                
-                if chapters:
-                    self.chapter_combo.setCurrentIndex(current_idx)
+        for novel in self.manager.data["library"]:
+            if novel["title"] == title:
+                return novel
+        return None
+
+    def on_novel_selection_changed(self):
+        novel = self.get_selected_novel()
+        if not novel:
+            self.current_novel_path = None
+            self.current_chapters = []
+            self.chapter_combo.clear()
+            self.update_progress_label(0)
+            return
+
+        self.current_novel_path = novel["path"]
+        self.current_chapters = self.logic.get_chapters(novel["path"])
+        self.chapter_manually_selected = False
+
+        self.chapter_combo.blockSignals(True)
+        self.chapter_combo.clear()
+        for chapter in self.current_chapters:
+            self.chapter_combo.addItem(chapter["title"], chapter["pos"])
+        self.chapter_combo.blockSignals(False)
+
+        self.sync_combo_to_progress(novel.get("last_pos", 0))
+
+    def on_chapter_changed(self, index):
+        if index >= 0 and self.current_chapters:
+            self.chapter_manually_selected = True
+            self.update_progress_label()
+
+    def sync_progress(self, path, pos):
+        for novel in self.manager.data["library"]:
+            if novel["path"] == path:
+                novel["last_pos"] = pos
                 break
+
+        if path != self.current_novel_path:
+            return
+
+        self.chapter_manually_selected = False
+        self.sync_combo_to_progress(pos)
 
     def on_add_novel(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open TXT", "", "TXT Files (*.txt)")
         if path:
-            title = path.split('/')[-1].replace('.txt', '')
+            title = os.path.splitext(os.path.basename(path))[0]
             self.manager.add_novel(title, path)
             self.refresh_library()
 
     def on_read_selected(self):
-        selected = self.novel_list.selectedItems()
-        if selected:
-            title = selected[0].text()
-            for n in self.manager.data["library"]:
-                if n["title"] == title:
-                    start_pos = n.get("last_pos", 0)
-                    # Override start_pos if chapter selected
-                    if self.current_chapters and self.chapter_combo.currentIndex() >= 0:
-                        start_pos = self.current_chapters[self.chapter_combo.currentIndex()]["pos"]
-                    
-                    self.novel_selected.emit(n, start_pos)
-                    break
+        novel = self.get_selected_novel()
+        if not novel:
+            return
 
+        start_pos = novel.get("last_pos", 0)
+        if self.chapter_manually_selected and self.chapter_combo.currentIndex() >= 0:
+            chapter_pos = self.chapter_combo.currentData()
+            if chapter_pos is not None:
+                start_pos = int(chapter_pos)
+
+        self.novel_selected.emit(novel.copy(), start_pos)
 
     def on_change_color(self):
         color = QColorDialog.getColor(QColor(self.settings["font_color"]), self)
@@ -239,7 +327,6 @@ class LibraryView(QWidget):
     def update_settings(self):
         self.settings["font_size"] = self.fs_slider.value()
         self.settings["text_opacity"] = self.to_slider.value() / 100.0
-        self.settings["window_opacity"] = self.wo_slider.value() / 100.0
         self.settings["reading_mode"] = self.rm_check.isChecked()
         self.manager.update_settings(self.settings)
         self.apply_preview_settings()
@@ -250,15 +337,17 @@ class LibraryView(QWidget):
         font = QFont()
         font.setPointSize(s["font_size"])
         self.preview_box.setFont(font)
-        
+
         color = QColor(s["font_color"])
         r, g, b = color.red(), color.green(), color.blue()
         a = s["text_opacity"]
-        
+
         self.preview_box.setStyleSheet(f"""
             QTextEdit {{
                 color: rgba({r}, {g}, {b}, {a});
-                background-color: rgba(30, 30, 30, {s['window_opacity']});
-                border: 1px solid #4CAF50;
+                background-color: #0f1716;
+                border: 1px solid #30463f;
+                border-radius: 14px;
+                padding: 14px;
             }}
         """)

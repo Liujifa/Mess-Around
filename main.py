@@ -2,6 +2,7 @@
 import sys
 import os
 from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QIcon, QAction
 from library_manager import LibraryManager
 from reader_logic import ReaderLogic
@@ -48,6 +49,7 @@ class MoYuApp:
     def setup_connections(self):
         self.library_win.novel_selected.connect(self.open_novel)
         self.library_win.settings_changed.connect(self.reader_win.apply_settings)
+        self.reader_win.progress_changed.connect(self.library_win.sync_progress)
 
     def setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self.app)
@@ -94,6 +96,7 @@ class MoYuApp:
 
     def open_novel(self, novel_data, start_pos=0):
         # Override saved position with user selection if provided
+        novel_data["_restore_saved_scroll"] = start_pos == novel_data.get("last_pos", 0)
         novel_data["last_pos"] = start_pos
         self.reader_win.load_novel(novel_data)
         self.reader_win.show()
@@ -101,9 +104,7 @@ class MoYuApp:
 
     def quit_app(self):
         # Save progress if reading
-        if hasattr(self.reader_win, 'current_novel'):
-            cursor = self.reader_win.reader_area.textCursor()
-            self.manager.update_pos(self.reader_win.current_novel["path"], cursor.position())
+        self.reader_win.persist_progress()
         
         self.app.quit()
 
