@@ -49,6 +49,14 @@ class LibraryManager:
         self.save()
         return new_item
 
+    def remove_novel(self, path):
+        for index, item in enumerate(self.data["library"]):
+            if item["path"] == path:
+                del self.data["library"][index]
+                self.save()
+                return True
+        return False
+
     def update_pos(self, path, pos):
         self.update_progress(path, pos)
 

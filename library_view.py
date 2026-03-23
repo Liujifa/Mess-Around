@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QSlider,
     QTextEdit,
@@ -19,12 +20,15 @@ from PyQt6.QtWidgets import (
 )
 
 import styles
+from download_dialog import WebDownloadDialog
 
 
 TRANSLATIONS = {
     "CN": {
         "lib_title": "\u5c0f\u8bf4\u4e66\u5e93",
         "add_novel": "\u6dfb\u52a0\u5c0f\u8bf4 (TXT)",
+        "delete_novel": "\u5220\u9664\u5c0f\u8bf4",
+        "download_web": "\u7f51\u9875\u4e0b\u8f7d TXT",
         "start_reading": "\u5f00\u59cb\u9605\u8bfb",
         "settings": "\u9605\u8bfb\u8bbe\u7f6e",
         "font_size": "\u5b57\u4f53\u5927\u5c0f",
@@ -38,10 +42,14 @@ TRANSLATIONS = {
         "current_progress": "\u5f53\u524d\u7eed\u8bfb\u7ae0\u8282\uff1a",
         "next_start": "\u5373\u5c06\u4ece\u8fd9\u91cc\u5f00\u59cb\uff1a",
         "no_chapters": "\u672a\u8bc6\u522b\u5230\u7ae0\u8282\uff0c\u5c06\u6309\u4e0a\u6b21\u9605\u8bfb\u4f4d\u7f6e\u7ee7\u7eed\u3002",
+        "delete_confirm_title": "\u5220\u9664\u5c0f\u8bf4",
+        "delete_confirm_text": "\u786e\u5b9a\u8981\u5c06\u300a{title}\u300b\u4ece\u4e66\u5e93\u4e2d\u79fb\u9664\u5417\uff1f\n\n\u8fd9\u4e0d\u4f1a\u5220\u9664\u539f\u59cb TXT \u6587\u4ef6\u3002",
     },
     "EN": {
         "lib_title": "Novel Library",
         "add_novel": "Add Novel (TXT)",
+        "delete_novel": "Remove Novel",
+        "download_web": "Download TXT",
         "start_reading": "Start Reading",
         "settings": "Reading Settings",
         "font_size": "Font Size",
@@ -55,6 +63,8 @@ TRANSLATIONS = {
         "current_progress": "Current chapter: ",
         "next_start": "Will start from: ",
         "no_chapters": "No chapters detected. Reading will resume from the last saved position.",
+        "delete_confirm_title": "Remove Novel",
+        "delete_confirm_text": "Remove \"{title}\" from the library?\n\nThis will not delete the original TXT file.",
     },
 }
 
@@ -97,6 +107,14 @@ class LibraryView(QWidget):
         self.btn_add = QPushButton(self.t("add_novel"))
         self.btn_add.clicked.connect(self.on_add_novel)
         self.btn_layout.addWidget(self.btn_add)
+
+        self.btn_delete = QPushButton(self.t("delete_novel"))
+        self.btn_delete.clicked.connect(self.on_delete_selected)
+        self.btn_layout.addWidget(self.btn_delete)
+
+        self.btn_download = QPushButton(self.t("download_web"))
+        self.btn_download.clicked.connect(self.on_download_web)
+        self.btn_layout.addWidget(self.btn_download)
 
         self.btn_read = QPushButton(self.t("start_reading"))
         self.btn_read.clicked.connect(self.on_read_selected)
@@ -184,6 +202,8 @@ class LibraryView(QWidget):
     def retranslate_ui(self):
         self.lib_group.setTitle(self.t("lib_title"))
         self.btn_add.setText(self.t("add_novel"))
+        self.btn_delete.setText(self.t("delete_novel"))
+        self.btn_download.setText(self.t("download_web"))
         self.btn_read.setText(self.t("start_reading"))
         self.chapter_group.setTitle(self.t("chapter_select"))
         self.settings_group.setTitle(self.t("settings"))
@@ -260,6 +280,14 @@ class LibraryView(QWidget):
                 return novel
         return None
 
+    def select_novel_by_title(self, title: str):
+        for index in range(self.novel_list.count()):
+            item = self.novel_list.item(index)
+            if item.text() == title:
+                self.novel_list.setCurrentItem(item)
+                self.on_novel_selection_changed()
+                break
+
     def on_novel_selection_changed(self):
         novel = self.get_selected_novel()
         if not novel:
@@ -304,6 +332,45 @@ class LibraryView(QWidget):
             title = os.path.splitext(os.path.basename(path))[0]
             self.manager.add_novel(title, path)
             self.refresh_library()
+            self.select_novel_by_title(title)
+
+    def on_download_web(self):
+        dialog = WebDownloadDialog(self.settings.get("language", "CN"), self)
+        if dialog.exec() and dialog.result_data:
+            title = dialog.result_data["title"]
+            file_path = dialog.result_data["file_path"]
+            novel = self.manager.add_novel(title, file_path)
+            self.refresh_library()
+            self.select_novel_by_title(novel["title"])
+
+    def on_delete_selected(self):
+        novel = self.get_selected_novel()
+        if not novel:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            self.t("delete_confirm_title"),
+            self.t("delete_confirm_text").format(title=novel["title"]),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        current_row = self.novel_list.currentRow()
+        self.manager.remove_novel(novel["path"])
+        self.current_novel_path = None
+        self.current_chapters = []
+        self.chapter_manually_selected = False
+        self.refresh_library()
+
+        if self.novel_list.count() > 0:
+            next_row = min(current_row, self.novel_list.count() - 1)
+            self.novel_list.setCurrentRow(max(0, next_row))
+        else:
+            self.chapter_combo.clear()
+            self.update_progress_label(0)
 
     def on_read_selected(self):
         novel = self.get_selected_novel()
@@ -349,5 +416,6 @@ class LibraryView(QWidget):
                 border: 1px solid #30463f;
                 border-radius: 14px;
                 padding: 14px;
+                font-size: {s['font_size']}pt;
             }}
         """)

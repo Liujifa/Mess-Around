@@ -43,7 +43,7 @@ QScrollBar::sub-line:vertical {
     background-color: transparent;
     border: none;
     padding: 30px 40px 40px 40px;
-    font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+    font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
     line-height: 1.8;
     selection-background-color: rgba(94, 151, 246, 0.35);
     selection-color: #ffffff;
@@ -84,7 +84,7 @@ LIBRARY_QSS = """
 QWidget {
     background-color: #0d1117;
     color: #e6edf3;
-    font-family: system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+    font-family: 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
     font-size: 13px;
 }
 
@@ -106,7 +106,8 @@ QGroupBox::title {
 
 QListWidget,
 QComboBox,
-QTextEdit {
+QTextEdit,
+QPlainTextEdit {
     background-color: #010409;
     alternate-background-color: #0d1117;
     border: 1px solid #30363d;
