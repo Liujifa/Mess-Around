@@ -286,7 +286,6 @@ class WebDownloadDialog(QDialog):
         if self.thread and self.thread.isRunning():
             if self.worker:
                 self.worker.abort()
-            self.btn_close.setEnabled(False)
             self.append_log("Canceling download...")
-            return
+            # We don't return here anymore, we call super().reject() to close
         super().reject()

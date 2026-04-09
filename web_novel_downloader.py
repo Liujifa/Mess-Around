@@ -254,12 +254,35 @@ class WebNovelDownloader:
         return self._download_generic_book(normalized_url, title_override.strip())
 
     def normalize_url(self, url: str) -> str:
-        cleaned = (url or "").strip()
-        if not cleaned:
-            raise WebDownloadError("URL is required.")
-        if not re.match(r"^https?://", cleaned, re.IGNORECASE):
-            cleaned = "https://" + cleaned
-        return cleaned
+        url = url.strip()
+        if not url.startswith("http"):
+            url = "http://" + url
+        
+        # Site-specific normalization (Mobile versions are better for scraping)
+        if "bikuxs.com" in url:
+            if "www.bikuxs.com" in url:
+                url = url.replace("www.bikuxs.com", "m.bikuxs.com")
+            elif "m.bikuxs.com" not in url:
+                # Handle cases like bikuxs.com/shu/...
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                if parsed.netloc == "bikuxs.com":
+                    url = url.replace("bikuxs.com", "m.bikuxs.com")
+        
+        if not re.match(r"^https?://", url, re.IGNORECASE):
+            url = "https://" + url
+        return url
+
+    def get_headers(self, url: str, referer: str = "") -> dict:
+        headers = {}
+        if referer:
+            headers["Referer"] = referer
+            
+        # If it's a mobile site, use a mobile User-Agent
+        if "m.bikuxs.com" in url:
+            headers["User-Agent"] = "Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.162 Mobile Safari/537.36"
+        
+        return headers
 
     def _load_charset(self):
         charset_candidates = [
@@ -432,10 +455,12 @@ class WebNovelDownloader:
         total = len(chapter_links)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_map = {
-                executor.submit(self.download_generic_chapter, chapter.url, chapter.title): chapter
-                for chapter in chapter_links
-            }
+            future_map = {}
+            for index, chapter in enumerate(chapter_links):
+                if self.is_cancelled:
+                    break
+                future = executor.submit(self.download_generic_chapter, chapter.url, chapter.title)
+                future_map[future] = chapter
 
             completed = 0
             for future in concurrent.futures.as_completed(future_map):
@@ -454,6 +479,7 @@ class WebNovelDownloader:
         return [downloaded[index] for index in sorted(downloaded)]
 
     def download_generic_chapter(self, url: str, title_hint: str = "") -> tuple[str, str]:
+        self.log(f"Downloading: {title_hint or url}")
         chapter_title, parts = self.collect_chapter_pages(url, title_hint)
         return chapter_title, "\n\n".join(parts).strip()
 
@@ -516,9 +542,9 @@ class WebNovelDownloader:
         return "", last_title, last_next_page
 
     def fetch_html(self, url: str, referer: str = "") -> str:
-        headers = {"Referer": referer} if referer else None
+        headers = self.get_headers(url, referer)
         try:
-            response = self.session.get(url, timeout=20, headers=headers)
+            response = self.session.get(url, timeout=30, headers=headers)
             response.raise_for_status()
             response.encoding = response.apparent_encoding or response.encoding or "utf-8"
             return response.text
