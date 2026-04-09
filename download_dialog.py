@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -28,12 +28,14 @@ TRANSLATIONS = {
         "name": "\u4e66\u540d\uff08\u53ef\u9009\uff09",
         "browser": "\u5bfc\u5165\u6d4f\u89c8\u5668 Cookie",
         "none": "\u4e0d\u5bfc\u5165",
+        "import_file": "\u4ece\u6587\u4ef6\u5bfc\u5165 (.txt / .json)",
+        "how_to_export": "\u5982\u4f55\u5bfc\u51fa?",
         "download": "\u4e0b\u8f7d\u5e76\u5165\u5e93",
         "close": "\u5173\u95ed",
         "status_idle": "\u7b49\u5f85\u5f00\u59cb",
         "logs": "下载日志",
         "cancel": "取消下载",
-        "hint": "请输入小说目录页或单章页URL。即使输入单章，下载器也会自动尝试追溯全书目录并完整下载全本。",
+        "hint": "请输入小说目录页或单章页URL。若遇到 403 Forbidden 错误，请先在常用浏览器中打开该网址并通过验证（如点选“我是人类”），然后在此处选择对应的浏览器导入 Cookie。",
         "missing_url": "请先输入 URL。",
         "success": "\u4e0b\u8f7d\u5b8c\u6210\uff0c\u5df2\u81ea\u52a8\u51c6\u5907\u5165\u5e93\u3002",
         "failed": "\u4e0b\u8f7d\u5931\u8d25",
@@ -47,12 +49,14 @@ TRANSLATIONS = {
         "name": "Book Title (Optional)",
         "browser": "Import Browser Cookie",
         "none": "Do Not Import",
+        "import_file": "Import from file (.txt / .json)",
+        "how_to_export": "How to Export?",
         "download": "Download And Import",
         "close": "Close",
         "status_idle": "Waiting to start",
         "logs": "Download Log",
         "cancel": "Cancel",
-        "hint": "Enter a novel index or single chapter URL. The downloader will intelligently trace back to the catalog and download the entire book.",
+        "hint": "Enter an index or chapter URL. If you get a 403 Forbidden error, visit the site in your browser to pass any challenges, then select that browser here to import cookies.",
         "missing_url": "Please enter a URL first.",
         "success": "Download completed and is ready to import into the library.",
         "failed": "Download Failed",
@@ -69,12 +73,13 @@ class DownloadWorker(QObject):
     finished = pyqtSignal(dict)
     failed = pyqtSignal(str)
 
-    def __init__(self, url: str, title: str, browser: str, download_dir: str):
+    def __init__(self, url: str, title: str, browser: str, download_dir: str, language: str = "CN"):
         super().__init__()
         self.url = url
         self.title = title
         self.browser = browser
         self.download_dir = download_dir
+        self.language = language
         self.downloader = None
 
     def run(self):
@@ -83,6 +88,7 @@ class DownloadWorker(QObject):
                 download_dir=self.download_dir,
                 progress_callback=self.progress.emit,
                 log_callback=self.log.emit,
+                language=self.language,
             )
             result = self.downloader.download(self.url, self.title, self.browser)
             payload = {
@@ -136,11 +142,22 @@ class WebDownloadDialog(QDialog):
         self.browser_combo.addItem("Edge", "edge")
         self.browser_combo.addItem("Chrome", "chrome")
         self.browser_combo.addItem("Firefox", "firefox")
+        self.browser_combo.addItem(self.t("import_file"), "file")
 
         form.addRow(self.t("url"), self.url_input)
         form.addRow(self.t("name"), self.title_input)
         form.addRow(self.t("browser"), self.browser_combo)
         layout.addLayout(form)
+
+        help_row = QHBoxLayout()
+        self.help_btn = QPushButton(self.t("how_to_export"))
+        self.help_btn.setFlat(True)
+        self.help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.help_btn.setStyleSheet("color: #4CAF50; text-decoration: underline; text-align: left; font-size: 11px;")
+        self.help_btn.clicked.connect(self.show_export_help)
+        help_row.addWidget(self.help_btn)
+        help_row.addStretch()
+        layout.addLayout(help_row)
 
         self.status_label = QLabel(self.t("status_idle"))
         layout.addWidget(self.status_label)
@@ -181,12 +198,28 @@ class WebDownloadDialog(QDialog):
         self.title_input.setEnabled(False)
         self.browser_combo.setEnabled(False)
 
+        browser = self.browser_combo.currentData()
+        if browser == "file":
+            from PyQt6.QtWidgets import QFileDialog
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, self.t("import_file"), "", "Cookie Files (*.txt *.json);;All Files (*)"
+            )
+            if not file_path:
+                self.btn_download.setEnabled(True)
+                self.btn_close.setText(self.t("close"))
+                self.url_input.setEnabled(True)
+                self.title_input.setEnabled(True)
+                self.browser_combo.setEnabled(True)
+                return
+            browser = file_path # Pass the path as the "browser" param
+
         self.thread = QThread(self)
         self.worker = DownloadWorker(
             url=url,
             title=self.title_input.text().strip(),
-            browser=self.browser_combo.currentData(),
+            browser=browser,
             download_dir=self.download_dir,
+            language=self.language,
         )
         self.worker.moveToThread(self.thread)
 
@@ -235,6 +268,19 @@ class WebDownloadDialog(QDialog):
         self.url_input.setEnabled(True)
         self.title_input.setEnabled(True)
         self.browser_combo.setEnabled(True)
+
+    def show_export_help(self):
+        guide_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookie_export_guide.md")
+        try:
+            with open(guide_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            # Basic markdown to plain text conversion for MessageBox
+            import re
+            content = re.sub(r"#+ (.*)", r"--- \1 ---", content)
+            content = re.sub(r"\[(.*?)\]\(.*?\)", r"\1", content)
+            QMessageBox.information(self, self.t("how_to_export"), content)
+        except Exception:
+            QMessageBox.information(self, self.t("how_to_export"), "Please refer to cookie_export_guide.md for instructions.")
 
     def reject(self):
         if self.thread and self.thread.isRunning():

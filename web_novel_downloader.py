@@ -21,6 +21,23 @@ except ImportError as exc:
 
 from browser_cookie_importer import CookieImportError, import_browser_cookies
 
+TRANSLATIONS = {
+    "CN": {
+        "access_denied": "\u8bbf\u95ee\u88ab\u62d2\u7edd (403 Forbidden)\uff1a{url}\u3002\n\n\u8fd9\u901a\u5e38\u610f\u5473\u7740 {hostname} \u5f00\u542f\u4e86\u53cd\u722c\u866b\u4fdd\u62a4\uff08\u5982 Cloudflare\uff09\u3002\n\u89e3\u51b3\u65b9\u6848\uff1a\u8bf7\u5148\u5728\u6d4f\u89c8\u5668\u4e2d\u8bbf\u95ee\u8be5\u7f51\u7ad9\u5e76\u901a\u8fc7\u4eba\u673a\u9a8c\u8bc1\uff0c\u7136\u540e\u5728\u672c\u8f6f\u4ef6\u4e2d\u4f7f\u7528\u201c\u5bfc\u5165\u6d4f\u89c8\u5668 Cookie\u201d\u6216\u201c\u4ece\u6587\u4ef6\u5bfc\u5165\u201d\u529f\u80fd\u3002",
+        "import_file_failed": "\u4ece\u9009\u62e9\u7684\u6587\u4ef6\u5bfc\u5165 Cookie \u5931\u8d25\u3002",
+        "import_browser_failed": "\u5bfc\u5165\u6d4f\u89c8\u5668 Cookie \u5931\u8d25\u3002",
+        "import_file_success": "\u5df2\u4ece\u6587\u4ef6 {name} \u5bfc\u5165 {domain} \u7684 Cookie",
+        "import_browser_success": "\u5df2\u4ece {browser} \u5bfc\u5165 {domain} \u7684 Cookie",
+    },
+    "EN": {
+        "access_denied": "Access Denied (403 Forbidden) for {url}.\n\nThis usually means {hostname} has anti-bot protection (like Cloudflare).\nSolution: Visit the site in your browser, pass any 'Verify you are human' checks, then use the 'Import Browser Cookie' or 'Import from file' feature.",
+        "import_file_failed": "Failed to import cookies from the selected file.",
+        "import_browser_failed": "Failed to import browser cookies.",
+        "import_file_success": "Imported cookies from file {name} for {domain}",
+        "import_browser_success": "Imported {browser} cookies for {domain}",
+    }
+}
+
 
 ProgressCallback = Optional[Callable[[int, int, str, str], None]]
 LogCallback = Optional[Callable[[str], None]]
@@ -183,6 +200,7 @@ class WebNovelDownloader:
         download_dir: str,
         progress_callback: ProgressCallback = None,
         log_callback: LogCallback = None,
+        language: str = "CN"
     ):
         if IMPORT_ERROR is not None or requests is None or BeautifulSoup is None:
             raise WebDownloadError(
@@ -192,6 +210,7 @@ class WebNovelDownloader:
         self.download_dir = download_dir
         self.progress_callback = progress_callback
         self.log_callback = log_callback
+        self.language = language
         self.is_cancelled = False
         self.session = requests.Session()
         self.session.headers.update(
@@ -199,11 +218,16 @@ class WebNovelDownloader:
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/123.0.0.0 Safari/537.36"
+                    "Chrome/124.0.0.0 Safari/537.36"
                 ),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
                 "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
                 "Cache-Control": "no-cache",
                 "Pragma": "no-cache",
+                "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+                "Sec-Ch-Ua-Mobile": "?0",
+                "Sec-Ch-Ua-Platform": '"Windows"',
+                "Upgrade-Insecure-Requests": "1",
             }
         )
         os.makedirs(self.download_dir, exist_ok=True)
@@ -252,18 +276,33 @@ class WebNovelDownloader:
         return None
 
     def _import_browser_cookie(self, browser: str, hostname: str):
-        browser = (browser or "none").strip().lower()
+        browser_val = (browser or "none").strip()
         last_error = None
+        trans = TRANSLATIONS.get(self.language, TRANSLATIONS["EN"])
+
+        if os.path.isfile(browser_val):
+            from browser_cookie_importer import import_cookies_from_file
+            for domain in self._cookie_domains(hostname):
+                try:
+                    imported = import_cookies_from_file(browser_val, domain, self.language)
+                    self.session.headers["Cookie"] = imported.cookie_header
+                    self.log(trans["import_file_success"].format(name=os.path.basename(browser_val), domain=domain))
+                    return
+                except Exception as exc:
+                    last_error = exc
+            raise WebDownloadError(str(last_error or trans["import_file_failed"]))
+
+        browser_name = browser_val.lower()
         for domain in self._cookie_domains(hostname):
             try:
-                imported = import_browser_cookies(browser, domain)
+                imported = import_browser_cookies(browser_name, domain, self.language)
                 self.session.headers["Cookie"] = imported.cookie_header
-                self.log(f"Imported {imported.browser} cookies for {domain}")
+                self.log(trans["import_browser_success"].format(browser=imported.browser, domain=domain))
                 return
             except CookieImportError as exc:
                 last_error = exc
 
-        raise WebDownloadError(str(last_error or "Failed to import browser cookies."))
+        raise WebDownloadError(str(last_error or trans["import_browser_failed"]))
 
     def _cookie_domains(self, hostname: str) -> list[str]:
         parts = [part for part in hostname.split(".") if part]
@@ -478,10 +517,17 @@ class WebNovelDownloader:
 
     def fetch_html(self, url: str, referer: str = "") -> str:
         headers = {"Referer": referer} if referer else None
-        response = self.session.get(url, timeout=20, headers=headers)
-        response.raise_for_status()
-        response.encoding = response.apparent_encoding or response.encoding or "utf-8"
-        return response.text
+        try:
+            response = self.session.get(url, timeout=20, headers=headers)
+            response.raise_for_status()
+            response.encoding = response.apparent_encoding or response.encoding or "utf-8"
+            return response.text
+        except requests.exceptions.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 403:
+                hostname = urlparse(url).hostname or "the website"
+                trans = TRANSLATIONS.get(self.language, TRANSLATIONS["EN"])
+                raise WebDownloadError(trans["access_denied"].format(url=url, hostname=hostname)) from exc
+            raise
 
     def resolve_ajax_content(self, url: str, html: str) -> str:
         ajax_match = re.search(r'\$\.ajax\(\{\s*type\s*:\s*[\'"]post[\'"]\s*,\s*url\s*:\s*[\'"]([^\'"]+)[\'"]\s*,\s*data\s*:\s*\{(.*?)\}', html, re.IGNORECASE)
