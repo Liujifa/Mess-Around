@@ -4,6 +4,8 @@ import concurrent.futures
 import json
 import os
 import re
+import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,7 +67,10 @@ class WebDownloadError(RuntimeError):
 class WebNovelDownloader:
     FANQIE_DOMAIN = "fanqienovel.com"
     CODE = ((58344, 58715), (58345, 58716))
-    MAX_WORKERS = 2
+    MAX_WORKERS = 3
+    _last_request_time = 0.0
+    _request_interval = 1.0  # Seconds between requests globally
+    _rate_limit_lock = threading.Lock()
     MAX_CONTENT_RETRIES = 3
     MAX_CATALOG_PAGES = 200
     MAX_CHAPTER_PAGES = 24
@@ -475,8 +480,6 @@ class WebNovelDownloader:
                 except Exception as exc:
                     self.log(f"Failed to download chapter: {chapter.title} - {exc}")
                 self.emit_progress(completed, total, "progress_web", chapter.title)
-                # Small delay to avoid triggering rate limits
-                time.sleep(0.3)
 
         return [downloaded[index] for index in sorted(downloaded)]
 
@@ -559,17 +562,32 @@ class WebNovelDownloader:
         max_retries = 5 if retry_on_429 else 1
         
         for attempt in range(max_retries):
+            # Global rate limiting across all threads
+            with self._rate_limit_lock:
+                now = time.time()
+                elapsed = now - self._last_request_time
+                if elapsed < self._request_interval:
+                    time.sleep(self._request_interval - elapsed)
+                self._last_request_time = time.time()
+
             try:
                 response = self.session.get(url, timeout=30, headers=headers)
                 
                 if response.status_code == 429 and retry_on_429:
-                    wait_time = (attempt + 1) * 3
-                    self.log(f"Rate limited (429) at {url}. Waiting {wait_time}s (attempt {attempt+1}/{max_retries})...")
+                    wait_time = 2 + attempt * 2
+                    self.log(f"Rate limited (429) at {url}. Waiting {wait_time}s...")
                     time.sleep(wait_time)
+                    # Increase the interval slightly if we hit 429
+                    with self._rate_limit_lock:
+                        self._request_interval = min(2.5, self._request_interval + 0.2)
                     continue
                 
                 response.raise_for_status()
                 
+                # Successful request, maybe slowly decrease the interval
+                with self._rate_limit_lock:
+                    self._request_interval = max(0.8, self._request_interval - 0.01)
+
                 # Enhanced encoding detection
                 if not response.encoding or response.encoding.lower() == 'iso-8859-1':
                     response.encoding = response.apparent_encoding or "utf-8"
