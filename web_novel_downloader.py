@@ -65,7 +65,7 @@ class WebDownloadError(RuntimeError):
 class WebNovelDownloader:
     FANQIE_DOMAIN = "fanqienovel.com"
     CODE = ((58344, 58715), (58345, 58716))
-    MAX_WORKERS = 4
+    MAX_WORKERS = 2
     MAX_CONTENT_RETRIES = 3
     MAX_CATALOG_PAGES = 200
     MAX_CHAPTER_PAGES = 24
@@ -475,6 +475,8 @@ class WebNovelDownloader:
                 except Exception as exc:
                     self.log(f"Failed to download chapter: {chapter.title} - {exc}")
                 self.emit_progress(completed, total, "progress_web", chapter.title)
+                # Small delay to avoid triggering rate limits
+                time.sleep(0.3)
 
         return [downloaded[index] for index in sorted(downloaded)]
 
@@ -516,7 +518,15 @@ class WebNovelDownloader:
         last_next_page = ""
 
         for attempt in range(self.MAX_CONTENT_RETRIES):
-            html = self.fetch_html(url, referer=referer)
+            try:
+                html = self.fetch_html(url, referer=referer)
+            except Exception as exc:
+                if attempt < self.MAX_CONTENT_RETRIES - 1:
+                    self.log(f"Retrying fetch_html for {url} due to {exc}")
+                    time.sleep(1.0 * (attempt + 1))
+                    continue
+                raise
+
             html = self.resolve_ajax_content(url, html)
             soup = BeautifulSoup(html, "html.parser")
             page_title = self.clean_chapter_title(self.extract_chapter_title(soup))
@@ -531,29 +541,57 @@ class WebNovelDownloader:
                 return content, page_title, next_page_url
 
             if next_page_url:
-                return "", page_title, next_page_url
+                # If it's a multi-page chapter and we found the next page link,
+                # we don't necessarily need content on this page (might be a splash page)
+                # but usually we want to continue.
+                return content, page_title, next_page_url
 
             if attempt < self.MAX_CONTENT_RETRIES - 1:
-                self.log(f"Retrying chapter page: {url}")
+                self.log(f"Retrying chapter page content parsing: {url}")
                 time.sleep(0.8 * (attempt + 1))
 
         if last_content and not self.is_placeholder_content(last_content):
             return last_content, last_title, last_next_page
         return "", last_title, last_next_page
 
-    def fetch_html(self, url: str, referer: str = "") -> str:
+    def fetch_html(self, url: str, referer: str = "", retry_on_429: bool = True) -> str:
         headers = self.get_headers(url, referer)
-        try:
-            response = self.session.get(url, timeout=30, headers=headers)
-            response.raise_for_status()
-            response.encoding = response.apparent_encoding or response.encoding or "utf-8"
-            return response.text
-        except requests.exceptions.HTTPError as exc:
-            if exc.response is not None and exc.response.status_code == 403:
-                hostname = urlparse(url).hostname or "the website"
-                trans = TRANSLATIONS.get(self.language, TRANSLATIONS["EN"])
-                raise WebDownloadError(trans["access_denied"].format(url=url, hostname=hostname)) from exc
-            raise
+        max_retries = 5 if retry_on_429 else 1
+        
+        for attempt in range(max_retries):
+            try:
+                response = self.session.get(url, timeout=30, headers=headers)
+                
+                if response.status_code == 429 and retry_on_429:
+                    wait_time = (attempt + 1) * 3
+                    self.log(f"Rate limited (429) at {url}. Waiting {wait_time}s (attempt {attempt+1}/{max_retries})...")
+                    time.sleep(wait_time)
+                    continue
+                
+                response.raise_for_status()
+                
+                # Enhanced encoding detection
+                if not response.encoding or response.encoding.lower() == 'iso-8859-1':
+                    response.encoding = response.apparent_encoding or "utf-8"
+                
+                return response.text
+            except requests.exceptions.HTTPError as exc:
+                if exc.response is not None:
+                    if exc.response.status_code == 429 and retry_on_429:
+                        continue # Should be handled above but being safe
+                    if exc.response.status_code == 403:
+                        hostname = urlparse(url).hostname or "the website"
+                        trans = TRANSLATIONS.get(self.language, TRANSLATIONS["EN"])
+                        raise WebDownloadError(trans["access_denied"].format(url=url, hostname=hostname)) from exc
+                raise
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                if attempt < max_retries - 1:
+                    self.log(f"Network error at {url}: {exc}. Retrying...")
+                    time.sleep(2)
+                    continue
+                raise
+        
+        return ""
 
     def resolve_ajax_content(self, url: str, html: str) -> str:
         ajax_match = re.search(r'\$\.ajax\(\{\s*type\s*:\s*[\'"]post[\'"]\s*,\s*url\s*:\s*[\'"]([^\'"]+)[\'"]\s*,\s*data\s*:\s*\{(.*?)\}', html, re.IGNORECASE)
@@ -793,7 +831,7 @@ class WebNovelDownloader:
         if any(pattern in href_lower for pattern in href_patterns) and re.search(r"\d", href_lower):
             return True
 
-        if re.search(r"\d", title) and len(title) <= 32:
+        if re.search(r"\d", title) and len(title) <= 50:
             return True
 
         return False
